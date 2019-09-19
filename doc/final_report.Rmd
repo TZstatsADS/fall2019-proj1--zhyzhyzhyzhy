@@ -1,0 +1,206 @@
+---
+title: "What Songs tell us about?"
+author: "Haoyu Zhang(hz2563)"
+output:
+  html_document:
+    df_print: paged
+---
+
+!["What Songs tell us about"](/Users/haoyuzhang/Downloads/astarisborn.jpeg)
+
+
+
+
+```{r echo=FALSE,message=FALSE,warning=FALSE, fig.align='center'}
+library(tidyverse)
+library(tidytext)
+library(plotly)
+library(DT)
+library(tm)
+library(data.table)
+library(scales)
+library(wordcloud2)
+library(wordcloud)
+library(gridExtra)
+library(ngram)
+library(shiny)
+library(plotrix)
+library(ggplot2)
+library(quanteda)
+library(kableExtra)
+#library(qdap)
+```
+
+### Load the processed lyrics data along with artist information
+
+We use the processed data and artist information for our analysis.
+```{r warning=FALSE, message=FALSE, echo=FALSE,fig.align='center'}
+# load lyrics data
+load('../data/processed_lyrics.RData') 
+# load artist information
+dt_artist <- fread('../data/artists.csv') 
+
+dt_lyrics <- dt_lyrics %>%
+  mutate(song_length = nchar(lyrics))
+
+dt_lyrics <- dt_lyrics %>%
+  mutate(decade = 
+           ifelse(dt_lyrics$year %in% 1960:1969, "1960s",
+           ifelse(dt_lyrics$year %in% 1970:1979, "1970s", 
+           ifelse(dt_lyrics$year %in% 1980:1989, "1980s", 
+           ifelse(dt_lyrics$year %in% 1990:1999, "1990s", 
+           ifelse(dt_lyrics$year %in% 2000:2009, "2000s", 
+           ifelse(dt_lyrics$year %in% 2010:2015, "2010s", 
+                  "NA")))))))
+
+stemmed <- dt_lyrics$stemmedwords
+sample_row <- sample(dim(dt_lyrics)[1], size = 20000)
+corpus <- VCorpus(VectorSource(dt_lyrics[sample_row,]$stemmedwords))
+
+```
+
+## How about these songs?
+In order to get some basic characteristics of songs, the length of each song and the readability of lyrics would be analyzed in this part.
+
+#### Length of lyrics
+
+According to the histogram, what we can see is that most songs have the length of 500-1000 characters.
+
+```{r word count distribution, echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+ggplot(dt_lyrics,aes(x = dt_lyrics$song_length))+
+  geom_histogram(aes(fill = ..count..),breals = seq(0,500,50),show.legend = F)+
+  ylab("Count")+
+  xlim(min(dt_lyrics$song_length),  summary(dt_lyrics$song_length)[5]*1.5)+
+  xlab("Song Length")
+```
+
+#### Readability
+
+I also did a readability test for the sample of 20000 lyrics, here I used Flesch-Kincaid grade level to be my measure, which indicates how difficult a passsage in English is to understand. \\
+The grade level is calculated with the following formula:
+\[\text{Flesch-Kincaid} = 0.39(\frac{\text{total words}}{\text{total sentences}})+11.8(\frac{\text{total Syllabus}}{\text{total words}})-15.59\]
+
+We can see that most documents fall within the interval of 0-100, which shows us that lyrics are usually simple to listen and understand. Considering most songs are from Rock,Pop and Country genre,the result is reasonable.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+lyrics <- dt_lyrics$lyrics[sample_row]
+library(quanteda)
+txt <- as.character(lyrics)
+f1<-textstat_readability(txt, measure = c('Flesch.Kincaid'))
+ggplot(f1, aes(x=f1$Flesch.Kincaid))+geom_histogram(aes(fill = ..count..))+
+  labs(title = "Histogram of F-K score", x = "Flesch.Kincaid")
+```
+
+## Word Frequency 
+#### To investigate the most frequent words used in song lyrics, I first plot top 10 frequent words in songs.
+Then I did 2 wordclouds to have a clear picture of the word frequency.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+tdm <- TermDocumentMatrix(corpus)
+tdm_m <- as.matrix(tdm)
+term_frequency <- rowSums(tdm_m)
+term_frequency <- sort(term_frequency, decreasing = T)
+barplot(term_frequency[1:10], col = "darkorange", las = 2, horiz = F, main = "Top 10 frequent words")
+term_frequency[1:10]
+#kable(term_frequency[1:10])%>%
+#  kable_styling(bootstrap_options = c("striped","bordered"), full_width = F)
+
+word_freqs <- data.frame(term = names(term_frequency), num = term_frequency)
+wordcloud2(word_freqs, color = c("cornflowerblue", "chartreuse","darkorange"), shape = "cardioid")
+#wordcloud2(word_freqs, color = c("cornflowerblue", "chartreuse","darkorange"), shape = "star")
+#log<-system.file("examples/Microphone.png",package="wordcloud2")
+#wordcloud2(word_freqs, figPath = log, backgroundColor = "white")
+
+```
+!["WordCloud2"](/Users/haoyuzhang/Downloads/wordcloud_mic.png)
+
+
+Then, let's dive into specific genres of songs to see if there is any commonality or difference between different genres. Here I picked *Rock* and *Pop*, which the most common two genres among the data.\\
+```{r, echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+genre_freq <- table(dt_lyrics$genre)
+barplot(genre_freq, main = "Frequency of different genres")
+```
+
+First, let's look at the rock. I plot the most frequently appeard words in rock lyrics.
+!["WordCloud2"](/Users/haoyuzhang/Downloads/Rock.png)
+```{r  echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+
+
+all_rock <- paste(dt_lyrics$stemmedwords[dt_lyrics$genre=="Rock"], collapse = "")
+all_pop <- paste(dt_lyrics$stemmedwords[dt_lyrics$genre=="Pop"], collapse = "")
+all_rockvspop <- c(all_rock,all_pop)
+
+#ROCK word cloud
+rock_corpus <- VCorpus(VectorSource(all_rock))
+rock_tdm <- TermDocumentMatrix(rock_corpus)
+rock_m <- as.matrix(rock_tdm)
+rock_frequency <- rowSums(rock_m)
+rock_frequency <- sort(rock_frequency, decreasing = T)
+rock_freqs <- data.frame(term = names(rock_frequency), num = rock_frequency)
+#letterCloud(rock_freqs, word = "ROCK")
+
+letter_WC <- function(lyrics, genre){
+  lyrics_corpus <- VCorpus(VectorSource(lyrics))
+  lyrics_tdm <- TermDocumentMatrix(lyrics_corpus)
+  lyrics_m <- as.matrix(lyrics_tdm)
+  lyrics_frequency <- rowSums(lyrics_m)
+  lyrics_frequency <- sort(lyrics_frequency, decreasing = T)
+  lyrics_freqs <- data.frame(term = names(lyrics_frequency), num = lyrics_frequency)
+  letterCloud(lyrics_freqs, word = genre)
+}
+#letter_WC(all_pop, "POP")
+```
+
+Then, let's have a look at the word cloud of pop lyrics.
+!["WordCloud2"](/Users/haoyuzhang/Downloads/Pop.png)
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+#POP word cloud
+pop_corpus <- VCorpus(VectorSource(all_pop))
+pop_tdm <- TermDocumentMatrix(pop_corpus)
+pop_m <- as.matrix(pop_tdm)
+pop_frequency <- rowSums(pop_m)
+pop_frequency <- sort(pop_frequency, decreasing = T)
+pop_freqs <- data.frame(term = names(pop_frequency), num = pop_frequency)
+#letterCloud(pop_freqs, word = "POP")
+```
+
+After comparing individual genres, let's take a look at the comparison plots.
+
+As we can see from the commonality plot, both *Rock* and *Pop* love to sing the song about "Love", "You", "Time". 
+
+*Rock* focuses on *BURN*, *Life* and *Dead* while *Pop* focuses on sweet words like *Love*, *Baby*, *Girl* and *Heart*.
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.align='center'}
+rockvpop_corpus <- VCorpus(VectorSource(all_rockvspop))
+rockvpop_tdm <- TermDocumentMatrix(rockvpop_corpus)
+colnames(rockvpop_tdm) <- c("Rock", "Pop")
+rockvpop_m <- as.matrix(rockvpop_tdm)
+commonality.cloud(rockvpop_m, colors = "skyblue",max.words = 100)
+comparison.cloud(rockvpop_m, colors = c("orange", "blue"), max.words = 100, scale = c(4,1))
+
+common_words <- subset(
+rockvpop_m,
+    rockvpop_m[, 1] > 0 & rockvpop_m[, 2] > 0
+  )
+# Find most commonly shared words
+difference <- abs(common_words[, 1] - common_words[, 2])
+common_words <- cbind(common_words, difference)
+common_words <- common_words[order(common_words[, 3],
+                               decreasing = TRUE), ]
+top10_df <- data.frame(x = common_words[1:10, 1],
+                         y = common_words[1:10, 2],
+                         labels = rownames(common_words[1:10, ]))
+pyramid.plot(top10_df$x, top10_df$y,
+             labels = top10_df$labels,
+             gap = 12, top.labels = c("Rock", "Words", "Pop"), main = "Words in common", 
+             rxcol = "red", lxcol = "blue",
+             raxlab = NULL, unit = NULL, labelcex = 0.7
+             )
+top10_df$labels
+```
+
+
+## Summary
+#### As we can see from the plots, most frequent words used in Songs like POP and Rock is always about "Love", focusing on "You", and "I'll" do that for you in my whole "life" every"Day", but probabliy only in "Night" XD. 
+
+!["What Songs tell us about"](/Users/haoyuzhang/Downloads/baby.jpg)
+
